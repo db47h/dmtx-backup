@@ -1,0 +1,80 @@
+#!/bin/bash
+#
+
+function die() {
+    echo >&2 "$@"
+    exit 1
+}
+
+function imgsize()
+{
+    local SIZE
+    SIZE=$(identify "$1" | awk '{match($0, /[0-9]+x[0-9]+/); print substr($0, RSTART, RLENGTH);}')
+    echo ${SIZE/x/ }
+}
+
+POINTSIZE=36
+MODULE=5        # dmtxwrite module size
+LABEL_MARGIN=10
+WIDTH=720
+
+# get label size
+SIZE=($(convert -font "Courier-Bold" -pointsize $POINTSIZE label:"Ay\nyA" PNG:- | imgsize -))
+LABEL_HEIGHT=$((SIZE[1] + LABEL_MARGIN))
+# dmtx height including label
+HEIGHT=$((WIDTH + LABEL_HEIGHT))
+# page layout:
+#  <0.5" margin> <DMTX> <0.5" margin> <DMTX> <0.5" margin>
+# so one DMTX fits in (8.26" -1.5 ") / 2 inches
+DPI=$((WIDTH * 1000 / ((8267 - 1500)/2) ))
+
+[ $# != 1 ] && die "Usage: `basename $0` <label>"
+OUTPUT=$(mktemp -d --tmpdir) || die "Failed to create temporary working folder"
+cd "$OUTPUT"
+PREFIX="key_"
+TARGET="out"
+
+split -b 1555 -d - "$PREFIX"
+
+TOTAL=$(ls -l "$PREFIX"* | wc -l)  # # of chunks
+COUNT=0
+
+for f in "$PREFIX"*; do
+    PAGE=$((COUNT / 4))
+    cat "$f" >>"${TARGET}-${PAGE}.sum"
+    COUNT=$((COUNT + 1))
+    dmtxwrite -e 8 -d $MODULE -m $LABEL_MARGIN -o "$f.tiff" "$f"
+    # 1555 bytes fit in a 720x720 pixels image
+    SUM=$(md5sum "$f" | awk '{print $1}')
+    convert -gravity center "$f.tiff" -font "Courier-Bold" -pointsize $POINTSIZE \
+ 	label:"${SUM}\n$1 - matrix ${COUNT}/${TOTAL}" -append -colorspace gray "$f.png"
+    SIZE=($(imgsize "$f.png"))
+done
+
+montage -trim "$PREFIX"*.png -tile 2x2 -geometry "${WIDTH}x${HEIGHT}>+$((DPI/4))+$((DPI/4))" \
+    -units PixelsPerInch -density 72 -colorspace gray "${TARGET}.png"
+[ -e "${TARGET}.png" ] && mv "${TARGET}.png" "${TARGET}-0.png"
+
+GSINPUT=""
+TOTALPAGES=$((TOTAL / 4))
+[ $((TOTAL % 4)) -ne 0 ] && TOTALPAGES=$((TOTALPAGES + 1))
+COUNT=1
+for f in "${TARGET}-"*.png; do
+    SUM=$(md5sum "$(basename $f .png).sum" | awk '{print $1}')
+    convert -gravity center "$f" -font "Courier-Bold" -pointsize $POINTSIZE \
+ 	label:"${SUM}\n$1 - Page ${COUNT}/${TOTALPAGES}" -append -colorspace gray "$f"
+    out=`basename "$f" .png`.jpg
+    # add borders in order to center the image in the page
+    SIZE=($(imgsize "$f"))
+    BORDER="$(( ((8267 * DPI / 1000) - SIZE[0]) / 2 ))x$(( ((11693 * DPI / 1000) - SIZE[1]) / 2 ))"
+    convert "$f" -bordercolor white -border $BORDER "$out"
+    GSINPUT="${GSINPUT} ($out) viewJPEG showpage"
+    COUNT=$((COUNT + 1))
+done
+
+gs -q -sDEVICE=pdfwrite -o - /usr/share/ghostscript/9.05/lib/viewjpeg.ps \
+    -c "$GSINPUT"
+
+# cleanup
+cd /
+[ -d "$OUTPUT" ] && rm -rf "$OUTPUT"

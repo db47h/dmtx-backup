@@ -1,0 +1,161 @@
+#!/bin/bash
+#
+
+SCANPARAMS="--mode gray --source flatbed --resolution 300"
+# size in pixels of the border to trim around the raw scan
+# this is meant to remove scanning artifacts around the paper sheet
+# adjust to scan resolution
+BORDERTRIM=20
+
+TTY_SAVE="$(stty -g)"
+APP_NAME="`basename "$0"`"
+
+# Print error message then abort
+function die() {
+    echo >&2 "$@"
+    exit 1
+}
+
+# echo replacement. Outputs to stderr
+function msg() {
+    echo >&2 "$@"
+}
+
+# returns size of an image as "w h"
+# convert to array with ARRAY=($(imgsize file.png))
+function imgsize()
+{
+    local SIZE
+    SIZE=$(identify "$1" 2>&1 | \
+	awk '{match($0, /[0-9]+x[0-9]+/); print substr($0, RSTART, RLENGTH);}')
+    echo ${SIZE/x/ }
+}
+
+# CTRL-C / SIGNINT handler
+function abort() {
+    echo >&2
+    # restore tty settings if the user presses CTRL-C while in read
+    stty "$TTY_SAVE"
+    die Aborting
+}
+
+# decode an image
+function decode {
+    local F="$1"; shift
+    local O="$1"; shift
+    local W=$1; shift
+    local H=$1; shift
+    local OX=$1; shift
+    local OY=$1; shift
+
+    local TIMEOUT=${1:-2000}
+    local THRESHOLD=${2:-50}
+    local GAMMA_MAX=${3:-3}
+    GAMMA_MAX=$((GAMMA_MAX * 2))
+    local GAMMA=0
+
+    msg -n "$O ... "
+
+    if [ -e "$O".raw ]; then
+	if [ $(ls -s1 "$O".raw | cut -d' ' -f1) -ne 0 ]; then
+	    msg "skipping"
+	    return 0
+	fi
+    fi
+
+    while [ $GAMMA -le $GAMMA_MAX ]; do
+	local G=$(((GAMMA+1)/2))
+	[ $((GAMMA % 2)) == 0 ] && G=$((-G))
+	local G=$(((G+10) / 10)).$(((G+10) % 10))
+	msg -ne "\r$O ... GAMMA=$G THRESHOLD=$THRESHOLD\x1b[K"
+	convert -extract ${W}x${H}+${OX}+${OY} "$F" -gamma $G -threshold $THRESHOLD% \
+	    -trim -bordercolor white -border 50x50 +repage PGM:- | \
+	    dmtxread -m $TIMEOUT >"$O".raw
+	if [ $? == 0 ]; then
+	    msg -e "\r$O: GAMMA=$G THRESHOLD=$THRESHOLD\x1b[K"
+	    return
+	fi
+	msg -ne "\r$O ... GAMMA=$G THRESHOLD=$THRESHOLD -despeckle\x1b[K"
+	convert -extract ${W}x${H}+${OX}+${OY} "$F" -gamma $G -threshold $THRESHOLD% \
+	    -despeckle -trim -bordercolor white -border 50x50 +repage PGM:- | \
+	    dmtxread -m $TIMEOUT >"$O".raw
+	if [ $? == 0 ]; then
+	    msg -e "\r$O: GAMMA=$G THRESHOLD=$THRESHOLD -despeckle\x1b[K"
+	    return
+	fi
+	rm "$O".raw
+	GAMMA=$((GAMMA + 1))
+    done
+    msg -e "\r$O: FAILED\x1b[K"
+}
+
+trap abort SIGINT
+
+if [ $# == 0 -o "$1" == "-h" ]; then
+     cat >&2 <<EOF
+Usage: $APP_NAME prefix [timeout [threshold [gamma_range]]] >output_file
+
+ARGUMENTS
+
+  prefix:      Base file name for all generated files.
+               prefix-N.tiff: raw scan of page N
+               prefix-N.png: trimmed and deskewed full page scan
+               prefix-N-B.raw: data read from barcode B on page N
+               DO NOT use prefixes starting with a dash (-).
+  timeout:     Timeout in milliseconds before dmtxread gives up scanning an
+               image. Default: 2000.
+  threshold:   Gray to black and white threshold. Pixels with luminance above
+               the threshold value are set to white, others are set to black.
+               Default: 50.
+  gamma_range: If dmtxread fails to read an image, try adjusting the gamma
+               within +/- gamma_range/10. i.e. With the default gamma_range
+               of 3, gamma adjustments from 0.7 to 1.3 will be tried.
+EOF
+     exit 1
+fi
+SRC="$1"; shift
+
+COUNT=1
+while true; do
+    cat >&2 <<EOF
+Place page no. $COUNT on the scanner.
+Press <RETURN> to continue.
+Press Q to terminate.
+EOF
+    SKIP=0
+    if [ -e "$SRC"-$COUNT.tiff ]; then
+	msg "Press S to skip this page ($SRC-$COUNT.tiff already exists)"
+	SKIP=1
+    fi
+    read -N1 -s p
+    msg 
+    [ "$p" == "q" -o "$p" == "Q" ] && break;
+    if [ -z "$p" ]; then
+	msg "Scanning page $COUNT..."
+	scanimage $SCANPARAMS -p --format=tiff >"$SRC"-$COUNT.tiff && COUNT=$((COUNT+1))
+	msg -e "\n"
+    fi
+    [ $SKIP == 1 ] && if [ "$p" == "s" -o "$p" == "S" ]; then
+	COUNT=$((COUNT+1))
+    fi
+done
+
+PAGES=$(ls -l "$SRC"-*.tiff | wc -l)
+COUNT=0
+for f in "$SRC"-*.tiff; do
+    COUNT=$((COUNT + 1))
+    msg "Processing page $COUNT/$PAGES..."
+    NAME="$(basename "$f" .tiff)"
+    p="$NAME.png"
+    convert 2>/dev/null "$f" -shave ${BORDERTRIM}x${BORDERTRIM} -deskew 40% +repage "$p" || \
+	die "Aborting. Failed to read $f"
+    SIZE=($(imgsize "$p"))
+    WIDTH=$((SIZE[0] / 2))
+    HEIGHT=$((SIZE[1] / 2))
+    decode "$p" "${NAME}-1" $WIDTH $HEIGHT 0 0 "$@"
+    decode "$p" "${NAME}-2" $WIDTH $HEIGHT $WIDTH 0 "$@"
+    decode "$p" "${NAME}-3" $WIDTH $HEIGHT 0 $HEIGHT "$@"
+    decode "$p" "${NAME}-4" $WIDTH $HEIGHT $WIDTH $HEIGHT "$@"
+done
+
+cat "$SRC"*.raw
