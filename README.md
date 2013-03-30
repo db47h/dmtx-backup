@@ -22,7 +22,7 @@ Usage:
 
 	$ cat data-to-backup | dmtx-backup BACKUP-ID >output.pdf
 	
-The *BACKUP-ID* is purely informational and will be printed on the generated output PDF document in order to help you identify to which backup set a printed sheet of paper belongs to.
+The *BACKUP-ID* is purely informational and will be printed on the generated output PDF document in order to help you identify to which backup set a printed sheet of paper belongs to. *dmtx-backup* also prints the md5sum of the data encoded in each barcode below it and the md5dum of the data encoded in a page at the bottom of it.
 
 dmtx-restore
 ------------
@@ -97,9 +97,9 @@ Full example:
 	$ md5sum key.raw 
 	286c70a81f74c95dc233ed11e9e3bc3e  key.raw
 
-In the terminal output, *dmtx-restore* prints the settings used to successfully decode a barcode. In the above example, gamma values < 1.0 indicate that a higher threshold might have given better results.  *"-despeckle*" means that it had to use the *-despeckle* filter in ImageMagick.
+In the terminal output, *dmtx-restore* prints the settings used to successfully decode a barcode. In the above example, gamma values below 1.0 indicate that a higher threshold might have given better results.  *"-despeckle*" means that it had to use the *-despeckle* filter in ImageMagick.
 
-This does not matter much if everything has been read successfully, but if you need to retry, just rerun *dmtx-restore* with different settings, during the scan process press S to skip the pages that worked fine, ENTER to rescan failed pages (optional if you just want to try different settings) and Q to start the decoding process.  During the decoding process, if a barcode has already been decoded successfully (i.e. the corresponding file PREFIX-N-M.raw exists and has a non zero length), it will be skipped. Delete PREFIX-* to restart from scratch.
+This does not matter much if everything has been read successfully, but if you need to retry, just rerun *dmtx-restore* with different settings.  During the scan process press S to skip the pages that worked fine, ENTER to rescan failed pages (optional if you just want to try different settings) and Q to start the decoding process.  During the decoding process, if a barcode has already been decoded successfully (i.e. the corresponding file PREFIX-N-M.raw exists and has a non zero length), it will be skipped.  Delete PREFIX-2-4.raw do delete data read for a barcode 4 of page 2, PREFIX-1-* to delete everything for page 1 and PREFIX-* to restart from scratch.
 
 Use low thresholds (30 or lower) if the printout is faded or draft quality, and high thresholds (70 or higher) for high quality printouts (this can help filter out noise or smudges).
 
