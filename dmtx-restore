@@ -1,7 +1,27 @@
 #!/bin/bash
 #
+# Copyright (c) 2013 Denis Bernard <denis@wildservices.net>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Run dmtx-restore -h for usage information.
 
-SCANPARAMS="--mode gray --source flatbed --resolution 300"
+# additional parameters for scanimage. Adjust to your hardware
+# Note: tests with the automatic document feeder on an
+# HP OfficeJet Pro 8600 gave mixed results even at 300 dpi.
+# Using the flatbed scanner worked however 100% of the time.
+SCANPARAMS="--mode gray --resolution 300"
 # size in pixels of the border to trim around the raw scan
 # this is meant to remove scanning artifacts around the paper sheet
 # adjust to scan resolution
